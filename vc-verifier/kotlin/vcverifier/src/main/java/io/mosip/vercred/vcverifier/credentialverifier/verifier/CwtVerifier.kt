@@ -6,12 +6,13 @@ import com.authlete.cose.COSESign1
 import com.authlete.cose.COSEVerifier
 import com.upokecenter.cbor.CBORObject
 import com.upokecenter.cbor.CBORType
-import io.mosip.vercred.vcverifier.exception.DidResolverExceptions.UnsupportedDidUrl
 import io.mosip.vercred.vcverifier.exception.PublicKeyNotFoundException
 import io.mosip.vercred.vcverifier.exception.SignatureVerificationException
 import io.mosip.vercred.vcverifier.exception.UnknownException
 import io.mosip.vercred.vcverifier.keyResolver.PublicKeyResolverFactory
+import io.mosip.vercred.vcverifier.keyResolver.types.x509.X5uPublicKeyResolver
 import io.mosip.vercred.vcverifier.utils.Util.hexToBytes
+import io.mosip.vercred.vcverifier.utils.Util.parseFullyQualifiedIssuer
 import io.mosip.vercred.vcverifier.utils.Util.toCoseBytes
 import java.net.URI
 import java.security.PublicKey
@@ -19,7 +20,7 @@ import java.util.logging.Logger
 
 class CwtVerifier {
 
-   private val logger = Logger.getLogger(CwtVerifier::class.java.name)
+    private val logger = Logger.getLogger(CwtVerifier::class.java.name)
 
     private fun validateCoseStructure(coseObj: CBORObject) {
         if (coseObj.type != CBORType.Array || coseObj.size() != 4) {
@@ -39,15 +40,47 @@ class CwtVerifier {
             throw SignatureVerificationException("Invalid issuer (iss) type")
         }
 
-        val issURI = URI(iss.AsString())
-        return when (issURI.scheme) {
-            "did" -> issURI
-            "http", "https" -> {
-                val base = issURI.toString().removeSuffix("/")
-                URI("$base/.well-known/jwks.json")
-            }
-            else -> throw UnsupportedDidUrl("Unsupported issuer scheme: ${issURI.scheme}")
+        return try {
+            parseFullyQualifiedIssuer(iss.AsString())
+        } catch (exception: IllegalArgumentException) {
+            throw SignatureVerificationException(exception.message ?: "Invalid issuer (iss)")
         }
+    }
+
+    // COSE header label 35 (x5u) - RFC 9360
+    private fun extractX5u(coseObj: CBORObject): String? {
+        val X5U = CBORObject.FromObject(35)
+
+        val protectedBytes = coseObj[0].GetByteString()
+        if (protectedBytes.isNotEmpty()) {
+            val protected = CBORObject.DecodeFromBytes(protectedBytes)
+            val x5u = protected[X5U]
+            if (x5u != null && x5u.type == CBORType.TextString) {
+                return x5u.AsString()
+            }
+        }
+
+        val unprotected = coseObj[1]
+        val x5u = unprotected[X5U]
+        if (x5u != null && x5u.type == CBORType.TextString) {
+            return x5u.AsString()
+        }
+
+        return null
+    }
+
+    // Prefers x5u-based key resolution and falls back to JWKS for HTTP(S) issuers by constructing the .well-known/jwks.json endpoint locally
+    private fun resolvePublicKey(coseObj: CBORObject, issuer: URI, kid: String?): PublicKey {
+        val x5u = extractX5u(coseObj)
+        if (x5u != null) {
+            return X5uPublicKeyResolver().resolve(x5u)
+        }
+
+        val verificationMethod = when (issuer.scheme) {
+            "http", "https" -> URI("${issuer.toString().removeSuffix("/")}/.well-known/jwks.json")
+            else -> issuer
+        }
+        return PublicKeyResolverFactory().get(verificationMethod, kid)
     }
 
     private fun extractKid(coseObj: CBORObject): String? {
@@ -91,11 +124,16 @@ class CwtVerifier {
 
         val verifier = COSEVerifier(publicKey)
 
-        return try {
+        val isValid = try {
             verifier.verify(sign1)
         } catch (exception: Exception){
             throw SignatureVerificationException("CWT signature verification failed: ${exception.message}")
         }
+
+        if (!isValid) {
+            throw SignatureVerificationException("CWT signature verification failed")
+        }
+        return isValid
     }
 
     private fun requireAndUnwrapCwt(cbor: CBORObject): CBORObject {
@@ -133,7 +171,7 @@ class CwtVerifier {
             val kid = extractKid(coseObj)
 
             var issuer = extractIssuer(claims)
-            val publicKey = PublicKeyResolverFactory().get(issuer,kid)
+            val publicKey = resolvePublicKey(coseObj, issuer, kid)
 
             verifySignature(coseBytes, publicKey)
         } catch (exception: Exception) {
