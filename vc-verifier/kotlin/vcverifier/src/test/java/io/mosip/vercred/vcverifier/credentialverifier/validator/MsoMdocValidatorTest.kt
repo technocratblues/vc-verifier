@@ -451,7 +451,7 @@ class MsoMdocValidatorTest {
     inner class MsoMandatoryFieldValidation {
 
         @ParameterizedTest(name = "should throw when mandatory field \"{0}\" is not available in MSO")
-        @ValueSource(strings = ["version", "digestAlgorithm", "valueDigests", "deviceKeyInfo", "docType", "validityInfo"])
+        @ValueSource(strings = ["version", "digestAlgorithm", "valueDigests", "docType", "validityInfo"])
         fun `should throw exception when a mandatory field is not available in MSO`(mandatoryField: String) {
             val mso = buildMso().apply { remove(UnicodeString(mandatoryField)) }
             val credential = buildMdocCredential(mso)

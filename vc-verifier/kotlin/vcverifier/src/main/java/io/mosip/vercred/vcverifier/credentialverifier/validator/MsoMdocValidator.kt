@@ -47,7 +47,6 @@ class MsoMdocValidator {
             "version",
             "digestAlgorithm",
             "valueDigests",
-            "deviceKeyInfo",
             "docType",
             "validityInfo"
         )
