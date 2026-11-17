@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream
 import java.net.URI
 import java.security.PublicKey
 import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
 import java.util.logging.Logger
 
 class X5uPublicKeyResolver {
@@ -40,7 +41,10 @@ class X5uPublicKeyResolver {
         requireSameHostAsIssuer(uri, issuer)
         val cert = try {
             val certBytes = NetworkManagerClient.sendHTTPRequestForBytes(uri)
-            CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(certBytes))
+            val parsed = CertificateFactory.getInstance("X.509")
+                .generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
+            parsed.checkValidity()
+            parsed
         } catch (exception: Exception) {
             logger.severe("Error while resolving public key from x5u certificate: ${exception.message}")
             throw PublicKeyNotFoundException(

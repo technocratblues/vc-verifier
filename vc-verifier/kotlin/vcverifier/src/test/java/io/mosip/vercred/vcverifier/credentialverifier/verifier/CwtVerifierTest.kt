@@ -37,6 +37,10 @@ class CwtVerifierTest {
             ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5t-x5u-leaf-cert.der").toPath()
         )
         every { NetworkManagerClient.sendHTTPRequestForBytes(x5tX5uCertUrl) } returns x5tCertBytes
+        val expiredCertBytes = Files.readAllBytes(
+            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-expired-cert.der").toPath()
+        )
+        every { NetworkManagerClient.sendHTTPRequestForBytes("https://issuer.example.com/x5u-expired-cert.der") } returns expiredCertBytes
     }
 
     @Test
@@ -112,6 +116,21 @@ class CwtVerifierTest {
     }
 
     @Test
+    fun `should reject protected x5u that is an integer`() {
+        assertMalformedX5uRejected("invalid-x5u-protected-int-cwt.hex")
+    }
+
+    @Test
+    fun `should reject protected x5u that is a boolean`() {
+        assertMalformedX5uRejected("invalid-x5u-protected-bool-cwt.hex")
+    }
+
+    @Test
+    fun `should reject x5u certificate that is expired`() {
+        assertThrows<PublicKeyNotFoundException> { CwtVerifier().verify(readFixture("x5u-expired-cwt.hex")) }
+    }
+
+    @Test
     fun `should verify valid EC signed CWT`() {
         val coseHex = readClasspathFile("cwt_vc/valid-ec-cwt.hex")
             .replace("\\s".toRegex(), "")
@@ -132,6 +151,18 @@ class CwtVerifierTest {
 
     }
 
+
+    private fun readFixture(name: String) = readClasspathFile("cwt_vc/$name").replace("\\s".toRegex(), "")
+
+    // The stubbed fallback JWKS URL must never be requested for a malformed x5u.
+    private fun assertMalformedX5uRejected(fixture: String) {
+        val jwksUrl = "https://issuer.example.com/.well-known/jwks.json"
+        clearMocks(NetworkManagerClient.Companion, answers = false)
+        every { NetworkManagerClient.sendHTTPRequest(jwksUrl, any()) } returns null
+
+        assertThrows<SignatureVerificationException> { CwtVerifier().verify(readFixture(fixture)) }
+        verify(exactly = 0) { NetworkManagerClient.sendHTTPRequest(jwksUrl, any()) }
+    }
 
     private fun loadMockPublicKeys() {
         mockHttpResponse("https://221f38cc3ffc.ngrok-free.app/v1/certify/.well-known/jwks.json", readClasspathFile("cwt_vc/public_key/jwksECkey.json"))

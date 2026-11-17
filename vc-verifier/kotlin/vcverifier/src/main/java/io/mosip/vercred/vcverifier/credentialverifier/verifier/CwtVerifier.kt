@@ -71,14 +71,19 @@ class CwtVerifier {
 
     // COSE header label 35 (x5u) - RFC 9360. Protected x5u is always read. An unprotected x5u is read only when a
     // protected x5t is present, because the signed thumbprint then binds the downloaded certificate.
+    // A malformed x5u fails verification instead of falling back to the issuer JWKS.
     private fun extractX5u(coseObj: CBORObject, x5t: X5tHash?): String? {
         val X5U = CBORObject.FromObject(35)
 
         val fromProtected = protectedHeader(coseObj)?.get(X5U)
         val x5u = fromProtected ?: if (x5t != null) coseObj[1]?.get(X5U) else null
-        return if (x5u != null && x5u.type == CBORType.TextString) x5u.AsString() else null
+        if (x5u == null) return null
+        if (x5u.type != CBORType.TextString) {
+            throw SignatureVerificationException("Invalid x5u header")
+        }
+        return x5u.AsString()
     }
-    
+
     private fun resolvePublicKey(coseObj: CBORObject, issuer: URI, kid: String?): PublicKey {
         val x5t = extractX5t(coseObj)
         val x5u = extractX5u(coseObj, x5t)
