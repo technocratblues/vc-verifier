@@ -314,6 +314,15 @@ class SdJwtValidator {
                         mutableNode[claimName] = claimValue
                     }
                 }
+                // Digest of an array element, written as {"...": "<digest>"}
+                val arrayElementDigest = mutableNode["..."] as? String
+                if (mutableNode.size == 1 && arrayElementDigest != null) {
+                    validateDigest(arrayElementDigest, hashAlg)
+                    allSdDigests += arrayElementDigest
+                    digestToDisclosure[arrayElementDigest]?.claimValue?.let { disclosedValue ->
+                        validateDisclosureSha(disclosedValue, digestToDisclosure, allSdDigests, hashAlg)
+                    }
+                }
                 mutableNode.remove("_sd")
 
                 for ((key, value) in mutableNode) {
