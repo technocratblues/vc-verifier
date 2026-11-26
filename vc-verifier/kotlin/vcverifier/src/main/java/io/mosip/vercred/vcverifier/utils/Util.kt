@@ -22,7 +22,6 @@ import io.mosip.vercred.vcverifier.signature.SignatureFactory
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.net.URISyntaxException
 import java.security.MessageDigest
@@ -134,12 +133,6 @@ object Util {
         }
         return null
     }
-
-    fun calculateDigest(
-        algorithm: String,
-        data: ByteArrayOutputStream,
-    ): ByteArray =
-        MessageDigest.getInstance(algorithm).digest(data.toByteArray())
 
     fun convertJsonToMap(jsonString: String): MutableMap<String, Any> {
         val mapper = jacksonObjectMapper()
