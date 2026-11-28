@@ -3,8 +3,8 @@ package io.mosip.vercred.vcverifier.keyResolver.types.x509
 import io.mockk.every
 import io.mockk.mockkObject
 import io.mosip.vercred.vcverifier.exception.PublicKeyNotFoundException
+import io.mosip.vercred.vcverifier.networkManager.FetchedResource
 import io.mosip.vercred.vcverifier.networkManager.NetworkManagerClient
-import io.mosip.vercred.vcverifier.networkManager.HttpMethod
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -32,8 +32,31 @@ class X5uPublicKeyResolverTest {
         val certBytes = Files.readAllBytes(
             ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-leaf-cert.der").toPath()
         )
-        every { NetworkManagerClient.sendHTTPRequestForBytes(x5u, HttpMethod.GET) } returns certBytes
+        every { NetworkManagerClient.sendHTTPRequestForResource(x5u) } returns FetchedResource("application/pkix-cert", certBytes)
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("p7")) } returns
+                FetchedResource("application/pkcs7-mime; smime-type=\"certs-only\"", classpathBytes("cwt_vc/x5u-leaf-cert.p7b"))
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("cose")) } returns
+                FetchedResource("application/cose-x509", classpathBytes("cwt_vc/x5u-leaf-cert.cose"))
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("cose-chain")) } returns
+                FetchedResource("application/cose-x509; usage=chain", classpathBytes("cwt_vc/x5u-leaf-cert.cose"))
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("pem-type")) } returns
+                FetchedResource("application/x-pem-file", certBytes)
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("no-type")) } returns
+                FetchedResource(null, certBytes)
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("pem-body")) } returns
+                FetchedResource("application/pkix-cert", pemOf(certBytes).toByteArray())
+        every { NetworkManagerClient.sendHTTPRequestForResource(urlFor("two-certs")) } returns
+                FetchedResource("application/cose-x509", classpathBytes("cwt_vc/x5u-leaf-cert.cose") + classpathBytes("cwt_vc/x5u-leaf-cert.cose"))
     }
+
+    private fun urlFor(name: String) = "https://issuer.example.com/$name"
+
+    private fun classpathBytes(path: String): ByteArray =
+        Files.readAllBytes(ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + path).toPath())
+
+    private fun pemOf(der: ByteArray): String =
+        "-----BEGIN CERTIFICATE-----\n" + java.util.Base64.getMimeEncoder(64, "\n".toByteArray()).encodeToString(der) +
+                "\n-----END CERTIFICATE-----\n"
 
     @Test
     fun `returns key when x5t matches the fetched cert`() {
@@ -56,6 +79,34 @@ class X5uPublicKeyResolverTest {
         assertThrows<PublicKeyNotFoundException> {
             X5uPublicKeyResolver().resolve(x5u, issuer, X5tHash(-16L, tampered))
         }
+    }
+
+    @Test
+    fun `accepts pkcs7-mime certs-only`() {
+        assertNotNull(X5uPublicKeyResolver().resolve(urlFor("p7"), issuer, X5tHash(-16L, leafSha256)))
+    }
+
+    @Test
+    fun `accepts cose-x509 and cose-x509 with usage chain`() {
+        assertNotNull(X5uPublicKeyResolver().resolve(urlFor("cose"), issuer, X5tHash(-16L, leafSha256)))
+        assertNotNull(X5uPublicKeyResolver().resolve(urlFor("cose-chain"), issuer, X5tHash(-16L, leafSha256)))
+    }
+
+    @Test
+    fun `rejects media types outside the RFC 9360 list`() {
+        assertThrows<PublicKeyNotFoundException> { X5uPublicKeyResolver().resolve(urlFor("pem-type"), issuer, X5tHash(-16L, leafSha256)) }
+        assertThrows<PublicKeyNotFoundException> { X5uPublicKeyResolver().resolve(urlFor("no-type"), issuer, X5tHash(-16L, leafSha256)) }
+    }
+
+    @Test
+    fun `rejects a PEM body served as pkix-cert`() {
+        assertThrows<PublicKeyNotFoundException> { X5uPublicKeyResolver().resolve(urlFor("pem-body"), issuer, X5tHash(-16L, leafSha256)) }
+    }
+
+    @Test
+    fun `rejects several certificates when there is no x5t to pick one`() {
+        assertThrows<PublicKeyNotFoundException> { X5uPublicKeyResolver().resolve(urlFor("two-certs"), issuer) }
+        assertNotNull(X5uPublicKeyResolver().resolve(urlFor("two-certs"), issuer, X5tHash(-16L, leafSha256)))
     }
 
     @Test

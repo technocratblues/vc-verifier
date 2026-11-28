@@ -89,6 +89,8 @@ class CwtVerifier {
         val x5t = extractX5t(coseObj)
         val x5u = extractX5u(coseObj, x5t)
         if (x5u != null) {
+            // RFC 9360: a signed x5t must pin the certificate behind x5u, otherwise the downloaded key is not bound to the token.
+            if (x5t == null) throw SignatureVerificationException("x5u requires a protected x5t header")
             return X5uPublicKeyResolver().resolve(x5u, issuer, x5t)
         }
 

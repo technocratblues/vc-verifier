@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import testutils.mockHttpResponse
 import testutils.readClasspathFile
+import io.mosip.vercred.vcverifier.networkManager.FetchedResource
 import io.mosip.vercred.vcverifier.networkManager.NetworkManagerClient
-import io.mosip.vercred.vcverifier.networkManager.HttpMethod
 import org.junit.jupiter.api.assertThrows
 import org.springframework.util.ResourceUtils
 import java.nio.file.Files
@@ -23,7 +23,9 @@ import java.nio.file.Files
 class CwtVerifierTest {
 
     // x5u fixtures are signed for https://issuer.example.com; the cert fetch goes through the mocked NetworkManagerClient.
-    private val x5uCertUrl = "https://issuer.example.com/leaf-cert.der"
+    private val signerCertUrl = "https://issuer.example.com/x5u-signer-cert.der"
+    private val expiredCertUrl = "https://issuer.example.com/x5u-signer-expired-cert.der"
+    private val unprotectedOnlyX5uUrl = "https://issuer.example.com/leaf-cert.der"
     private val x5tX5uCertUrl = "https://issuer.example.com/x5t-x5u-leaf-cert.der"
 
     @BeforeAll
@@ -31,17 +33,17 @@ class CwtVerifierTest {
         mockkObject(NetworkManagerClient.Companion)
         loadMockPublicKeys()
         val certBytes = Files.readAllBytes(
-            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-leaf-cert.der").toPath()
+            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-signer-cert.der").toPath()
         )
-        every { NetworkManagerClient.sendHTTPRequestForBytes(x5uCertUrl, HttpMethod.GET) } returns certBytes
+        every { NetworkManagerClient.sendHTTPRequestForResource(signerCertUrl) } returns FetchedResource("application/pkix-cert", certBytes)
         val x5tCertBytes = Files.readAllBytes(
             ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5t-x5u-leaf-cert.der").toPath()
         )
-        every { NetworkManagerClient.sendHTTPRequestForBytes(x5tX5uCertUrl, HttpMethod.GET) } returns x5tCertBytes
+        every { NetworkManagerClient.sendHTTPRequestForResource(x5tX5uCertUrl) } returns FetchedResource("application/pkix-cert", x5tCertBytes)
         val expiredCertBytes = Files.readAllBytes(
-            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-expired-cert.der").toPath()
+            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-signer-expired-cert.der").toPath()
         )
-        every { NetworkManagerClient.sendHTTPRequestForBytes("https://issuer.example.com/x5u-expired-cert.der", HttpMethod.GET) } returns expiredCertBytes
+        every { NetworkManagerClient.sendHTTPRequestForResource(expiredCertUrl) } returns FetchedResource("application/pkix-cert", expiredCertBytes)
     }
 
     @Test
@@ -83,8 +85,20 @@ class CwtVerifierTest {
     }
 
     @Test
+    fun `should reject protected x5u when x5t is missing without fetching the certificate`() {
+        clearMocks(NetworkManagerClient.Companion, answers = false)
+        val coseHex = readClasspathFile("cwt_vc/x5u-without-x5t-cwt.hex")
+            .replace("\\s".toRegex(), "")
+
+        assertThrows<SignatureVerificationException> {
+            CwtVerifier().verify(coseHex)
+        }
+        verify(exactly = 0) { NetworkManagerClient.sendHTTPRequestForResource(signerCertUrl) }
+    }
+
+    @Test
     fun `should ignore x5u carried only in the unprotected header`() {
-        // Earlier tests already hit sendHTTPRequestForBytes, so wipe the call history (keep stubs) before counting.
+        // Earlier tests already hit sendHTTPRequestForResource, so wipe the call history (keep stubs) before counting.
         clearMocks(NetworkManagerClient.Companion, answers = false)
         every {
             NetworkManagerClient.sendHTTPRequest("https://issuer.example.com/.well-known/jwks.json", any())
@@ -95,7 +109,7 @@ class CwtVerifierTest {
         assertThrows<PublicKeyNotFoundException> {
             CwtVerifier().verify(coseHex)
         }
-        verify(exactly = 0) { NetworkManagerClient.sendHTTPRequestForBytes(x5uCertUrl, HttpMethod.GET) }
+        verify(exactly = 0) { NetworkManagerClient.sendHTTPRequestForResource(unprotectedOnlyX5uUrl) }
     }
 
     @Test
@@ -128,7 +142,7 @@ class CwtVerifierTest {
 
     @Test
     fun `should reject x5u certificate that is expired`() {
-        assertThrows<PublicKeyNotFoundException> { CwtVerifier().verify(readFixture("x5u-expired-cwt.hex")) }
+        assertThrows<PublicKeyNotFoundException> { CwtVerifier().verify(readFixture("x5u-signer-expired-cwt.hex")) }
     }
 
     @Test
