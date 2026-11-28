@@ -10,8 +10,9 @@ This document provides a comprehensive overview of validating and verifying **CW
     - Downloads the issuer X.509 certificate and uses its public key.
     - Takes precedence over issuer-based resolution. There is no fallback when `x5u` is present.
     - Protected `x5u` is always read. An unprotected `x5u` is read only when a protected `x5t` is present.
+    - Requires a protected `x5t`. An `x5u` without `x5t` fails verification before any download.
     - Must be an `https` URL on the same host as `iss`, and the certificate must be within its validity period.
-- **`x5t` (COSE header label 34, protected header)**
+- **`x5t` (COSE header label 34, protected header, mandatory with `x5u`)**
     - Binds the downloaded `x5u` certificate to the signed header. Only SHA-256 (`-16` or `"sha-256"`) is supported.
 - **HTTP / HTTPS Issuer**
     - Retrieves issuer public key from `/.well-known/jwks.json` when `iss` is an HTTP(S) URL.
@@ -105,8 +106,9 @@ sequenceDiagram
       CwtVerifier->>CwtVerifier: Extract kid from protected or unprotected header
       CwtVerifier->>CwtVerifier: Extract x5t (protected) and x5u
       alt x5u present
+         Note over CwtVerifier: x5u without x5t is rejected
          CwtVerifier->>X5uPublicKeyResolver: Resolve public key using x5u, issuer and x5t
-         Note over X5uPublicKeyResolver: https only, same host as iss, certificate valid, x5t matches if present
+         Note over X5uPublicKeyResolver: https only, same host as iss, certificate valid, x5t matches
       else no x5u
          CwtVerifier->>PublicKeyResolverFactory: Resolve public key using issuer and kid
       end
@@ -141,7 +143,7 @@ sequenceDiagram
 - `x5u` present: resolved from the certificate, no fallback to JWKS or DID.
 - Malformed `x5u` or `x5t` fails verification.
 - `x5u` MUST be `https` and on the same host as `iss`.
-- Certificate MUST be within its validity period and, when `x5t` is present, match its SHA-256 thumbprint.
+- Certificate MUST be within its validity period and match the SHA-256 thumbprint in `x5t`. `x5u` without `x5t` MUST fail verification.
 
 ### Cryptographic Verification
 - CBOR tag `61` required.

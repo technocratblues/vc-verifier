@@ -43,6 +43,30 @@ class NetworkManagerClient {
             }
         }
 
+        private const val MAX_RESOURCE_BYTES = 64 * 1024
+        private const val RESOURCE_CALL_TIMEOUT_SECONDS = 10L
+
+        // For fetching a certificate named by an untrusted token. Redirects are off so a 3xx cannot move the
+        // request to another host or to plain http after the caller has checked the URL, and the body is capped.
+        fun sendHTTPRequestForResource(url: String): FetchedResource {
+            val client = OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .callTimeout(RESOURCE_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+            try {
+                client.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                    if (!response.isSuccessful) throw Exception(response.toString())
+                    val body = response.body ?: throw Exception("Empty response body")
+                    return FetchedResource(response.header("Content-Type"), readBounded(body, MAX_RESOURCE_BYTES))
+                }
+            } catch (exception: InterruptedIOException) {
+                throw NetworkManagerClientExceptions.NetworkRequestTimeout()
+            } catch (exception: Exception) {
+                throw NetworkManagerClientExceptions.NetworkRequestFailed(exception.message ?: "unknown error")
+            }
+        }
+
         fun sendHTTPRequestForBytes(
             url: String,
             method: HttpMethod,
@@ -143,6 +167,8 @@ class NetworkManagerClient {
         }
     }
 }
+
+class FetchedResource(val contentType: String?, val body: ByteArray)
 
 enum class HttpMethod {
     POST, GET

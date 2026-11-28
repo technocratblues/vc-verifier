@@ -4,8 +4,8 @@ import io.mockk.every
 import io.mockk.mockkObject
 import io.mosip.vercred.vcverifier.constants.CredentialFormat
 import io.mosip.vercred.vcverifier.credentialverifier.CredentialVerifierFactory
+import io.mosip.vercred.vcverifier.networkManager.FetchedResource
 import io.mosip.vercred.vcverifier.networkManager.NetworkManagerClient
-import io.mosip.vercred.vcverifier.networkManager.HttpMethod
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
@@ -31,9 +31,9 @@ class CwtVerifiableCredentialTest {
         )
 
         val certBytes = Files.readAllBytes(
-            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-leaf-cert.der").toPath()
+            ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "cwt_vc/x5u-signer-cert.der").toPath()
         )
-        every { NetworkManagerClient.sendHTTPRequestForBytes("https://issuer.example.com/leaf-cert.der", HttpMethod.GET) } returns certBytes
+        every { NetworkManagerClient.sendHTTPRequestForResource("https://issuer.example.com/x5u-signer-cert.der") } returns FetchedResource("application/pkix-cert", certBytes)
     }
 
     @Test
